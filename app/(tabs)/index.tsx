@@ -1,53 +1,59 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Image, Dimensions, TouchableOpacity , ScrollView, Animated, Easing } from 'react-native';
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, onValue, off } from 'firebase/database';
+
 
 const { width } = Dimensions.get('window');
 
-// ⚠️ CONFIGURACIÓN ESP32 - ACCESS POINT
-const ESP32_IP = '192.168.4.1'; // ← IP FIJA del ESP32
-const WIFI_SSID = 'Estacionamiento_ESP32';
-const WIFI_PASSWORD = '12345678';
+//configuración de Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyBcRioaBdcIONUZxVQA7oasJF8n6ztfRzI",
+  authDomain: "estacionamientointeligen-d95f7.firebaseapp.com",
+  databaseURL: "https://estacionamientointeligen-d95f7-default-rtdb.firebaseio.com",
+  projectId: "estacionamientointeligen-d95f7",
+  storageBucket: "estacionamientointeligen-d95f7.firebasestorage.app",
+  messagingSenderId: "910187892329",
+  appId: "1:910187892329:web:63de446194a62f03465cf8",
+  measurementId: "G-N84S4C5CNB"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+
 
 export default function HomeScreen() {
-  const [lugaresDisponibles, setLugaresDisponibles] = useState(0); 
-  const [cargando, setCargando] = useState(true);
+  const [lugaresDisponibles, setLugaresDisponibles] = useState(0); // Valor inicial de ejemplo
+  const [cargando, setCargando] = useState(false);
   const [errorConexion, setErrorConexion] = useState(false);
-  const [conectadoWifi, setConectadoWifi] = useState(false);
+  const [conectadoWifi, setConectadoWifi] = useState(true);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Función para obtener datos del ESP32
-  const obtenerEstadoESP32 = async () => {
-    try {
-      const response = await fetch(`http://${ESP32_IP}/estado`, {
-        method: 'GET',
-      });
-      
-      if (!response.ok) throw new Error('Error en respuesta');
-      
-      const data = await response.json();
-      setLugaresDisponibles(data.disponibles);
-      setErrorConexion(false);
+  //Manejo de datos desde fire
+useEffect(() => {
+  const estacionamientoRef = ref(database, 'Estacionamiento');
+  
+  const unsubscribe = onValue(estacionamientoRef, (snapshot) => {
+    const data = snapshot.val();
+    console.log('Datos de Firebase:', data);
+    
+    if (data) {
+      setLugaresDisponibles(data.lugares_disponibles || 0);
       setConectadoWifi(true);
-      
-    } catch (error) {
-      console.log('Error conectando al ESP32:', error);
-      setErrorConexion(true);
-      setConectadoWifi(false);
-    } finally {
-      setCargando(false);
+      setErrorConexion(false);
     }
-  };
+    setCargando(false);
+  }, (error) => {
+    console.error('Error Firebase:', error);
+    setErrorConexion(true);
+    setCargando(false);
+  });
 
-  // Actualizar cada 3 segundos
-  useEffect(() => {
-    obtenerEstadoESP32();
-    
-    const intervalo = setInterval(obtenerEstadoESP32, 3000);
-    
-    return () => clearInterval(intervalo);
-  }, []);
+  return () => off(estacionamientoRef, 'value', unsubscribe);
+}, []);
 
   // Animación cuando cambian los datos
   useEffect(() => {
@@ -104,35 +110,13 @@ export default function HomeScreen() {
 
   const config = configEstados[estado];
 
-  // Pantalla de instrucciones si no hay conexión
-  if (!conectadoWifi && errorConexion) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.tituloError}>Conectar al WiFi del ESP32</Text>
-        
-        <View style={styles.pasosContainer}>
-          <Text style={styles.paso}>1. Ve a Ajustes → WiFi</Text>
-          <Text style={styles.paso}>2. Busca: <Text style={styles.destacado}>{WIFI_SSID}</Text></Text>
-          <Text style={styles.paso}>3. Contraseña: <Text style={styles.destacado}>{WIFI_PASSWORD}</Text></Text>
-          <Text style={styles.paso}>4. Vuelve a esta app</Text>
-        </View>
-        
-        <TouchableOpacity 
-          style={styles.botonReintentar}
-          onPress={obtenerEstadoESP32}
-        >
-          <Text style={styles.botonTexto}>Reintentar Conexión</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   // Pantalla de carga
   if (cargando) {
     return (
       <View style={styles.container}>
-        <Text style={styles.cargandoTexto}>Buscando ESP32...</Text>
-        <Text style={styles.cargandoSubtexto}>Conectando a {ESP32_IP}</Text>
+        <Text style={styles.cargandoTexto}>Cargando datos...</Text>
+        <Text style={styles.cargandoSubtexto}>Buscando sensores</Text>
       </View>
     );
   }
@@ -191,16 +175,6 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* Info de conexión */}
-        <View style={styles.infoConexion}>
-          <Text style={styles.estadoConexion}>
-            {conectadoWifi ? '✅ Conectado al ESP32' : '❌ Sin conexión'}
-          </Text>
-          <Text style={styles.infoIP}>IP: {ESP32_IP}</Text>
-          <TouchableOpacity onPress={obtenerEstadoESP32}>
-            <Text style={styles.textoActualizar}>Toca para actualizar</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </ScrollView>
   );
@@ -215,12 +189,13 @@ const styles = StyleSheet.create({
     padding: 20,
     minHeight: '100%',
   },
-  container: {
+   container: {
     flex: 1,
     backgroundColor: '#73C8D2',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+    justifyContent: 'flex-start', // Cambiado de 'center' a 'flex-start'
+    paddingVertical: 20, // Reducido el padding vertical
+ // Aseguramos que ocupe toda la altura
   },
   header: {
     alignItems: 'center',
@@ -250,6 +225,9 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.3)',
     textShadowOffset: { width: 2, height: 2 },
     textShadowRadius: 5,
+    justifyContent: 'flex-start',
+    textAlign: 'center',
+    
   },
   statusCard: {
     alignItems: 'center',
@@ -321,11 +299,46 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
+  botonesContainer: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 15,
+    borderRadius: 10,
+    marginTop: 10,
+    marginBottom: 20,
+    alignItems: 'center',
+    minWidth: width * 0.85,
+  },
+  botonesTitulo: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  filaBotones: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 10,
+  },
+  botonNumero: {
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botonNumeroTexto: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   infoConexion: {
     backgroundColor: 'rgba(255,255,255,0.2)',
     padding: 15,
     borderRadius: 10,
-    marginTop: 20,
+    marginTop: 10,
     alignItems: 'center',
     minWidth: width * 0.85,
   },
@@ -361,10 +374,11 @@ const styles = StyleSheet.create({
     width: '90%',
   },
   paso: {
-    fontSize: 18,
+    fontSize: 16,
     color: '#2c3e50',
     marginBottom: 15,
-    lineHeight: 24,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   destacado: {
     fontWeight: 'bold',
@@ -378,7 +392,7 @@ const styles = StyleSheet.create({
   },
   botonTexto: {
     color: 'white',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   cargandoTexto: {
